@@ -23,7 +23,10 @@ __release_date__ = "15/01/2014"
 import os
 import sys
 
-from .srt import srtmerge
+try:
+    from .srt import srtmerge
+except SystemError:
+    from srt import srtmerge
 
 
 def print_version():

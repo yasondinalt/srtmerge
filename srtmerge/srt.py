@@ -31,6 +31,9 @@ from chardet.universaldetector import UniversalDetector
 SubRecord = namedtuple('SubRecord', ['start', 'finish', 'text'])
 DEFAULT_ENCODING = 'utf-8'
 
+second_sub_colour = '#BDBDBD'
+
+
 
 class Subtitles(Sequence, Iterable):
 
@@ -77,8 +80,10 @@ class Subtitles(Sequence, Iterable):
             while index_end < len(subs) and subs[index_end].start < finish:
                 rec = subs[index_end]
                 text.append(rec.text)
-                finish = max(finish, start + (rec.finish - rec.start) * 2 / 3)
+                finish = max(finish, start + (rec.finish - rec.start) * 2 / 3) #orig 2 / 3
                 index_end += 1
+                
+            #text = list(set(text))
 
             text = "".join(map(lambda item: item[1], sorted(text)))
             new_obj.append(SubRecord(start, finish, text))
@@ -165,19 +170,22 @@ def detect_encoding(file_path):
 def srtmerge(in_srt_files, out_srt,
              offset=0, use_chardet=False, encoding=DEFAULT_ENCODING):
     subs = Subtitles()
-    for file_path in in_srt_files:
+    for subnum, file_path in enumerate(in_srt_files):
         in_encoding = detect_encoding(file_path) if use_chardet else DEFAULT_ENCODING
-        subs = subs + subreader(file_path, encoding=in_encoding)
+        subs = subs + subreader(subnum, file_path, encoding=in_encoding)
 
     subwriter(out_srt, subs, offset, encoding)
 
 
-def subreader(file_path, encoding=DEFAULT_ENCODING):
+def subreader(subnum, file_path, encoding=DEFAULT_ENCODING):
     """
     Reads srt-file and returns Subtitles instance.
     Args:
         file_path: full path to srt-file
     """
+    def colour_text(text):
+        return '<font color="%s">%s</font>\n'%(second_sub_colour, text.strip())
+    
     subtitles = Subtitles()
 
     pattern_index = r"^\d+$"
@@ -190,10 +198,12 @@ def subreader(file_path, encoding=DEFAULT_ENCODING):
 
             if re.match(pattern_index, line):
                 if start and finish:  # we've found next index
+                    text_uni = unicode('{0}\n').format('\n'.join(text))
+                    if subnum == 1:
+                        text_uni = colour_text(text_uni)
                     subtitles.append(
                         SubRecord(start, finish,
-                                  text=unicode('{0}\n').format('\n'.join(text))
-                                  )
+                                  text=text_uni)
                     )
                     start = finish = None
                     text = []
@@ -204,9 +214,12 @@ def subreader(file_path, encoding=DEFAULT_ENCODING):
 
     # don't forget about last record
     if start and finish:
+        text_uni = unicode('{0}\n').format('\n'.join(text))
+        if subnum == 1:
+            text_uni = colour_text(text_uni)
         subtitles.append(
             SubRecord(start, finish,
-                      text=unicode('{0}\n').format('\n'.join(text)))
+                      text=text_uni)
         )
 
     return subtitles
@@ -222,10 +235,19 @@ def subwriter(filepath, subtitles, offset=0, encoding=DEFAULT_ENCODING):
     line = unicode("{index}\n{time}\n{text}\n")
     with codecs.open(filepath, 'w', encoding=encoding) as fd:
         for index, rec in enumerate(subtitles, 1):
+            
+            def remove_tags(match):
+                text = match.group(2)
+                text = re.sub(r'<font.*?>', '', text)
+                text = text.replace('</font>', '')
+                return '***\n'+match.group(1)+text+match.group(3)
+            pattern = r"(<font.*?>)(.*)(</font>)"
+            rec_text = re.sub(re.compile(pattern, re.U|re.I|re.S), remove_tags, rec.text)
+
             text = line.format(index=unicode(index),
                                time=parse_ms(rec.start + offset,
                                              rec.finish + offset),
-                               text=rec.text)
+                               text=rec_text)
             fd.write(text)
 
 if __name__ == '__main__':
